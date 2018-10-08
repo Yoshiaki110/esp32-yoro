@@ -24,9 +24,12 @@ const char* AP_SSID = "AccessPoint";   // サーバモードでのパスワー�
 const char* AP_PASS = "password1234";  // サーバモードでのパスワード
 WebServer *pServer;
 WiFiClient client;
-//char* host = "csoft-iot.cloudapp.net";
 char HOST[256];
-int PORT = 80;
+int PORT = 443;
+int MYID = 1;
+int DISTID = 1;
+
+int lastValue = 0;
 
 // WiFi設定
 void handleRootGet() {
@@ -35,14 +38,18 @@ void handleRootGet() {
   String ssid = f.readStringUntil('\n');
   String pass = f.readStringUntil('\n');
   String host = f.readStringUntil('\n');
+  String myid = f.readStringUntil('\n');
+  String distid = f.readStringUntil('\n');
   f.close();
 
   String html = "";
   html += "<h1>WiFi Settings</h1>";
   html += "<form method='post'>";
   html += "  <input type='text' value='" + ssid + "' name='ssid' placeholder='ssid'><br>";
-  html += "  <input type='text' value='" + pass + "' name='pass' placeholder='pass'><br>";
+  html += "  <input type='text' value='" + pass + "' name='pass' placeholder='password'><br>";
   html += "  <input type='text' value='" + host + "' name='host' placeholder='host'><br>";
+  html += "  <input type='text' value='" + myid + "' name='myid' placeholder='my id'><br>";
+  html += "  <input type='text' value='" + distid + "' name='distid' placeholder='dist id'><br>";
   html += "  <input type='submit'><br>";
   html += "</form>";
   pServer->send(200, "text/html", html);
@@ -54,16 +61,22 @@ void handleRootPost() {
   String ssid = pServer->arg("ssid");
   String pass = pServer->arg("pass");
   String host = pServer->arg("host");
+  String myid = pServer->arg("myid");
+  String distid = pServer->arg("distid");
   File f = SPIFFS.open(settings, "w");
   f.println(ssid);
   f.println(pass);
   f.println(host);
+  f.println(myid);
+  f.println(distid);
   f.close();
   String html = "";
   html += "<h1>WiFi Settings</h1>";
   html += ssid + "<br>";
   html += pass + "<br>";
   html += host + "<br>";
+  html += myid + "<br>";
+  html += distid + "<br>";
   pServer->send(200, "text/html", html);  
 }
 
@@ -92,17 +105,28 @@ void setup_server() {
 
 // 初期化(クライアントモード)
 void setup_client() {
-  File f = SPIFFS.open(settings, "r");
-  String ssid = f.readStringUntil('\n');
-  String pass = f.readStringUntil('\n');
-  String host = f.readStringUntil('\n');
-  f.close();
+//  File f = SPIFFS.open(settings, "r");
+//  String ssid = f.readStringUntil('\n');
+//  String pass = f.readStringUntil('\n');
+//  String host = f.readStringUntil('\n');
+//  String myid = f.readStringUntil('\n');
+//  String distid = f.readStringUntil('\n');
+  String ssid = "jq145602";
+  String pass = "jq-145602";
+  String host = "yoro.southeastasia.cloudapp.azure.com";
+  String myid = "10";
+  String distid = "10";
+//  f.close();
   ssid.trim();
   pass.trim();
   host.trim();
+  myid.trim();
+  distid.trim();
   Serial.println("SSID: " + ssid);
   Serial.println("PASS: " + pass);
   Serial.println("HOST: " + host);
+  Serial.println("MY ID: " + myid);
+  Serial.println("DIST ID: " + distid);
   WiFi.begin(ssid.c_str(), pass.c_str());
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -113,20 +137,6 @@ void setup_client() {
   Serial.println("WiFi connected");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-}
-
-// 初期化
-void setup() {
-  Serial.begin(115200);
-  Serial.println();
-  delay(1000);            // 1秒以内にMODEを切り替える
-  SPIFFS.begin(true);     // ファイルシステム初期化
-  pinMode(MODE_PIN, INPUT);
-  if (digitalRead(MODE_PIN) == 0) {
-    setup_server();       // サーバモード
-  } else {
-    setup_client();       // クライアントモード初期化
-  }
 }
 
 // サーバから受信
@@ -165,20 +175,12 @@ void send(unsigned char rid, unsigned char val) {
   client.flush();
 }
 
-void loop() {
-  Serial.println("loop");
-  receive();
-  send(200, 200);
-  delay(5000);
-}
-
-
-
-
-
 static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
-      uint8_t* pData, size_t length,bool isNotify) {
+      uint8_t* pData, size_t length, bool isNotify) {
   Serial.print("Notify callback for characteristic ");
+  if (pBLERemoteCharacteristic == nullptr) {
+    Serial.println("**pBLERemoteCharacteristic is null");
+  }
   Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
   Serial.print(" of data length ");
   Serial.println(length);
@@ -217,7 +219,8 @@ bool connectToServer(BLEAddress pAddress) {
   uint16_t valueInt16 = pConfigurationCharacteristic->readUInt16();
   Serial.print(" - Enabled accelerometer: ");
   Serial.println(valueInt16, BIN);
-  uint8_t accelerometerPeriod = 10;
+//  uint8_t accelerometerPeriod = 10;
+  uint8_t accelerometerPeriod = 100;
   pPeriodCharacteristic = pRemoteService->getCharacteristic(periodUUID);
   if (pPeriodCharacteristic == nullptr) {
     Serial.print("Failed to find our period: ");
@@ -257,32 +260,39 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 void scanBle() {
   BLEDevice::init("");
   BLEScan* pBLEScan = BLEDevice::getScan();
+  if (pBLEScan == nullptr) {
+    Serial.println("**pBLEScan is null");
+  }
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   pBLEScan->setActiveScan(true);
   pBLEScan->start(30);
 }
-
+/*
 short toShort(std::string s, int n) {
   short ret = 0;
   short a = s[n];
   short b = s[n + 1];
   ret = b * 256 + a;
   return ret/45;
+}*/
+
+int printAccelerometer(std::string s) {
+//  Serial.print(" Z: ");
+//  Serial.print(toShort(s, 10));
+  short data = 0;
+  short a = s[10];
+  short b = s[11];
+  data = b * 256 + a;
+  int ret = (int)data / 45;
+  Serial.print(ret);
+  return ret;
 }
 
-void printAccelerometer(std::string strings) {
-  Serial.print(" Z: ");
-  Serial.print(toShort(strings, 10));
-}
-
-void setup1() {
-  Serial.begin(115200);
-  Serial.println("Starting Arduino BLE Client application...");  
-  scanBle();
-}
-
-void loop1() {
+void loop() {
   if (doConnect == true) {
+    if (pServerAddress == nullptr) {
+      Serial.println("**pServerAddress is null");
+    }
     if (connectToServer(*pServerAddress)) {
       Serial.println("We are now connected to the BLE Server.");
       connected = true;
@@ -293,10 +303,39 @@ void loop1() {
   }
   if (connected) {
     Serial.print("Connected...");
+    if (pRemoteCharacteristic == nullptr) {
+      Serial.println("**pRemoteCharacteristic is null");
+    }
     std::string strings = pRemoteCharacteristic->readValue();
-    printAccelerometer(strings);
+    Serial.print(" * ");
+    int val = printAccelerometer(strings);
+//      int val = 99;
+    if (abs(lastValue - val) > 2) {
+      Serial.print(" send");
+      send(DISTID, val);
+      lastValue = val;
+    }
     Serial.println("");
   }
+  receive();
   delay(100);
+//  delay(1000);
 }
+// 初期化
+void setup() {
+  Serial.begin(115200);
+  Serial.println();
+  delay(500);
+  btStop();
+//  SPIFFS.begin(true);     // ファイルシステム初期化
+  pinMode(MODE_PIN, INPUT);
+  delay(1000);            // 1秒以内にMODEを切り替える
+//  if (digitalRead(MODE_PIN) == 0) {
+//    setup_server();       // サーバモード
+//  } else {
+    setup_client();       // クライアントモード初期化
+//  }
+  scanBle();
+}
+
 
